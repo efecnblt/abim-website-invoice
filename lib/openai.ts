@@ -112,7 +112,7 @@ SADECE JSON döndür, başka açıklama ekleme!`;
           content: `${prompt}\n\n=== FATURA METNİ (${pdfData.numpages} SAYFA) ===\n${pdfText}`
         }
       ],
-      max_tokens: 6000, // Increased for multi-page invoices with many rows
+      max_tokens: 16000, // GPT-4o-mini max output is 16,384 tokens - enough for very long invoices
       temperature: 0.1, // Low temperature for consistent extraction
       response_format: { type: "json_object" } // Force JSON response
     });

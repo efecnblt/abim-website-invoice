@@ -20,6 +20,7 @@ import {
   updateProcessedInvoice,
   ProcessedInvoice,
 } from "@/lib/storage";
+import { ExtractedInvoiceData } from "@/lib/types";
 import { ArrowLeft, Save, Download, Edit2, Check, X } from "lucide-react";
 import { generateExcel } from "@/lib/excel";
 
@@ -48,7 +49,7 @@ export default function InvoiceDetailPage() {
     }
   }, [id, router]);
 
-  const handleMetadataEdit = (field: keyof typeof invoice.data.metadata, value: any) => {
+  const handleMetadataEdit = (field: keyof ExtractedInvoiceData['metadata'], value: any) => {
     if (!editedData) return;
     setEditedData({
       ...editedData,

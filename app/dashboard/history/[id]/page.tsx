@@ -91,7 +91,7 @@ export default function InvoiceDetailPage() {
     if (!invoice) return;
     try {
       const buffer = await generateExcel([invoice.data]);
-      const blob = new Blob([buffer], {
+      const blob = new Blob([new Uint8Array(buffer)], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const url = window.URL.createObjectURL(blob);

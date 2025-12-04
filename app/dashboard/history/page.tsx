@@ -129,7 +129,7 @@ export default function HistoryPage() {
   const handleDownloadSingle = async (invoice: ProcessedInvoice) => {
     try {
       const buffer = await generateExcel([invoice.data]);
-      const blob = new Blob([buffer], {
+      const blob = new Blob([new Uint8Array(buffer)], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const url = window.URL.createObjectURL(blob);
@@ -152,7 +152,7 @@ export default function HistoryPage() {
     try {
       const allData = filteredHistory.map((item) => item.data);
       const buffer = await generateExcel(allData);
-      const blob = new Blob([buffer], {
+      const blob = new Blob([new Uint8Array(buffer)], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const url = window.URL.createObjectURL(blob);
@@ -179,7 +179,7 @@ export default function HistoryPage() {
       const selectedInvoices = filteredHistory.filter((item) => selectedIds.has(item.id));
       const selectedData = selectedInvoices.map((item) => item.data);
       const buffer = await generateExcel(selectedData, true); // true = batch mode with continuous numbering
-      const blob = new Blob([buffer], {
+      const blob = new Blob([new Uint8Array(buffer)], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const url = window.URL.createObjectURL(blob);

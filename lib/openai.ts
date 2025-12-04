@@ -1,15 +1,17 @@
 import OpenAI from "openai";
 import pdf from "pdf-parse";
 
-if (!process.env.OPENAI_API_KEY) {
-  throw new Error("OPENAI_API_KEY environment variable is required");
+function getOpenAIClient() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY environment variable is required");
+  }
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
 }
 
-export const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 export async function extractInvoiceData(pdfBase64: string, fileName: string) {
+  const openai = getOpenAIClient();
   const prompt = `Sen bir fatura/belge analiz uzmanısın. Verilen fatura metninden TÜM TABLO VERİLERİNİ çıkarman gerekiyor.
 
 ÖNEMLİ TALİMATLAR:

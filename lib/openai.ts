@@ -15,10 +15,19 @@ export async function extractInvoiceData(pdfBase64: string, fileName: string) {
   const prompt = `Sen bir fatura/belge analiz uzmanısın. Verilen fatura metninden TÜM TABLO VERİLERİNİ çıkarman gerekiyor.
 
 ÖNEMLİ TALİMATLAR:
-1. Faturadaki BAŞLIKLARI (headers) tespit et: Quantité, Menge, Dénomination, Bezeichnung, Unité, PU, EP, TVA, MWST, Somme, etc.
+1. Faturadaki BAŞLIKLARI (headers) tespit et:
+   - Miktar: Quantité, Menge, Qty, Anzahl
+   - Açıklama: Dénomination, Bezeichnung, Description, Article
+   - Birim: Unité, Unit, Einheit
+   - Fiyat: PU (Prix Unitaire), EP (Einzelpreis), Unit Price
+   - KDV: TVA, MWST, VAT
+   - Toplam: Somme, Total, Gesamt
+   - TARİH SÜTUNLARI (ÇOK ÖNEMLİ!): Date de prestation, Leistungsdatum, Lieferdatum, Service Date, Delivery Date, Date
+
 2. Her satırdaki verileri doğru sütunlara eşleştir
 3. Farklı dillerdeki (Fransızca, Almanca, İngilizce, Türkçe) başlıkları tanı
 4. Tablo dışı bilgileri metadata'ya al: Fatura No, Tarih, Tedarikçi, Müşteri, Toplam Tutar
+5. ÇOK SAYFALÎ FATURALAR: Eğer fatura birden fazla sayfaysa, TÜM SAYFALARDAKI verileri tek tabloda birleştir
 
 ÇIKTI FORMATI (JSON):
 {
@@ -33,10 +42,11 @@ export async function extractInvoiceData(pdfBase64: string, fileName: string) {
   },
   "tables": [
     {
-      "headers": ["Pos", "Article", "Dénomination", "Quantité", "Unité", "TVA", "PU", "Somme EUR"],
+      "headers": ["Pos", "Date de prestation", "Article", "Dénomination", "Quantité", "Unité", "TVA", "PU", "Somme EUR"],
       "rows": [
         {
           "Pos": "1",
+          "Date de prestation": "2025-04-01",
           "Article": "6031",
           "Dénomination": "Concassé grès 0-45 mm type 2",
           "Quantité": 20.640,
@@ -47,6 +57,7 @@ export async function extractInvoiceData(pdfBase64: string, fileName: string) {
         },
         {
           "Pos": "2",
+          "Date de prestation": "2025-04-15",
           "Article": "6031",
           "Dénomination": "Concassé grès 0-45 mm type 2",
           "Quantité": 21.900,
@@ -62,11 +73,13 @@ export async function extractInvoiceData(pdfBase64: string, fileName: string) {
 
 ÖNEMLİ NOTLAR:
 - Tüm sayısal değerleri NUMBER olarak ver (string değil!)
-- Tarih formatı: YYYY-MM-DD
+- Tarih formatı: YYYY-MM-DD (örn: 01.04.2025 → 2025-04-01, 19.08.2025 → 2025-08-19)
+- TARİH SÜTUNLARINI MUTLAKA ÇIKAR: Eğer tabloda "Date de prestation", "Leistungsdatum", "Lieferdatum" gibi tarih sütunu varsa, headers'a ekle ve her satırdaki tarihi çıkar
 - Eğer bir alan bulunamazsa null kullan
 - Boş satırları atla
 - Her satırdaki tüm sütun verilerini eksiksiz çıkar
 - Başlıkları faturadaki orijinal dilleriyle koru
+- ÇOK SAYFALÎ FATURALAR: Fatura 2+ sayfa ise, tüm sayfaları oku ve BÜTÜN verileri tek tabloda birleştir
 
 SADECE JSON döndür, başka açıklama ekleme!`;
 
@@ -80,7 +93,10 @@ SADECE JSON döndür, başka açıklama ekleme!`;
       throw new Error("PDF'den metin çıkarılamadı. PDF bozuk veya boş olabilir.");
     }
 
-    console.log("PDF Text Length:", pdfText.length);
+    console.log("📄 PDF Info:");
+    console.log("  - Total Pages:", pdfData.numpages);
+    console.log("  - Text Length:", pdfText.length, "characters");
+    console.log("  - File Name:", fileName);
     console.log("PDF Text Preview (first 500 chars):", pdfText.substring(0, 500));
 
     // Step 2: Send text to GPT-4o-mini for structured extraction
@@ -89,14 +105,14 @@ SADECE JSON döndür, başka açıklama ekleme!`;
       messages: [
         {
           role: "system",
-          content: "Sen bir fatura tablo veri çıkarma uzmanısın. Verilen fatura metninden tüm tablo verilerini ve metadata'yı yapılandırılmış JSON formatında çıkarırsın. Sadece JSON formatında cevap verirsin."
+          content: "Sen bir fatura tablo veri çıkarma uzmanısın. Verilen fatura metninden tüm tablo verilerini ve metadata'yı yapılandırılmış JSON formatında çıkarırsın. Çok sayfalı faturalarda TÜM SAYFALARDAKI verileri tek tabloda birleştirirsin. Tarih sütunlarını (Date de prestation, Leistungsdatum, etc.) mutlaka tespit edersin. Sadece JSON formatında cevap verirsin."
         },
         {
           role: "user",
-          content: `${prompt}\n\n=== FATURA METNİ ===\n${pdfText}`
+          content: `${prompt}\n\n=== FATURA METNİ (${pdfData.numpages} SAYFA) ===\n${pdfText}`
         }
       ],
-      max_tokens: 3000, // Increased for large tables
+      max_tokens: 6000, // Increased for multi-page invoices with many rows
       temperature: 0.1, // Low temperature for consistent extraction
       response_format: { type: "json_object" } // Force JSON response
     });

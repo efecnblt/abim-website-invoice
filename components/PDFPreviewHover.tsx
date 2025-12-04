@@ -66,7 +66,7 @@ export function PDFPreviewHover({ pdfData, pdfUrl, children }: PDFPreviewHoverPr
         >
           <div className="w-full h-full overflow-auto bg-gray-100 p-2">
             <Document
-              file={pdfSource}
+              file={pdfSource as any}
               options={{
                 cMapUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/cmaps/`,
                 cMapPacked: true,

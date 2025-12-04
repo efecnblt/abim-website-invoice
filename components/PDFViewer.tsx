@@ -11,7 +11,7 @@ import "react-pdf/dist/esm/Page/TextLayer.css";
 pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
 
 interface PDFViewerProps {
-  file: string | Uint8Array; // base64 string or buffer
+  file: string | Uint8Array | { data: Uint8Array }; // base64 string or buffer
   onLoadSuccess?: (numPages: number) => void;
 }
 
@@ -82,7 +82,7 @@ export function PDFViewer({ file, onLoadSuccess }: PDFViewerProps) {
       <div className="flex-1 overflow-auto bg-gray-200 p-4">
         <div className="flex justify-center">
           <Document
-            file={file}
+            file={file as any}
             onLoadSuccess={onDocumentLoadSuccess}
             options={{
               cMapUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/cmaps/`,

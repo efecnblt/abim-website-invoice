@@ -331,7 +331,7 @@ export default function HistoryPage() {
               <div className="flex gap-2">
                 <Button onClick={handleDownloadSelected} variant="default">
                   <Download className="mr-2 h-4 w-4" />
-                  Seçilenleri Excel'e Aktar
+                  Seçilenleri Excel&apos;e Aktar
                 </Button>
                 <Button onClick={() => setSelectedIds(new Set())} variant="outline">
                   Seçimi Temizle

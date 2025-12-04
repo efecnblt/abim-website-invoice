@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateExcel } from "@/lib/excel";
-import { InvoiceData } from "@/lib/types";
+import { ExtractedInvoiceData } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
   try {
-    const data: InvoiceData[] = await request.json();
+    const data: ExtractedInvoiceData[] = await request.json();
 
     if (!data || !Array.isArray(data) || data.length === 0) {
       return NextResponse.json(
@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
     const excelBuffer = await generateExcel(data);
 
     // Return file
-    return new NextResponse(excelBuffer, {
+    return new NextResponse(new Uint8Array(excelBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

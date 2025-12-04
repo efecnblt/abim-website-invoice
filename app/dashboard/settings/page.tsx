@@ -140,7 +140,7 @@ export default function SettingsPage() {
               <div>
                 <p className="font-medium">PDF Migration</p>
                 <p className="text-sm text-muted-foreground">
-                  Eski base64 PDF'leri Supabase'e taşı
+                  Eski base64 PDF&apos;leri Supabase&apos;e taşı
                 </p>
               </div>
               <Button

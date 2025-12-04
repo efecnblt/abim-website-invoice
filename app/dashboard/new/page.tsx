@@ -203,7 +203,7 @@ export default function NewInvoicePage() {
                     <p className="font-medium text-green-900">İşlem Başarılı!</p>
                     <p className="text-sm text-green-700">
                       {extractedData.length} fatura işlendi ve geçmişe kaydedildi.
-                      "Geçmiş" sekmesinden detaylara ulaşabilir ve Excel indirebilirsiniz.
+                      &quot;Geçmiş&quot; sekmesinden detaylara ulaşabilir ve Excel indirebilirsiniz.
                     </p>
                   </div>
                 </div>

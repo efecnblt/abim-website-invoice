@@ -1,0 +1,143 @@
+// LocalStorage service for data persistence
+import { ExtractedInvoiceData } from "./types";
+
+export interface InvoiceTemplate {
+  id: string;
+  name: string;
+  description: string;
+  language: string;
+  samplePdfName?: string;
+  fieldMappings: {
+    metadata: string[];
+    tableHeaders: string[];
+  };
+  customPrompt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProcessedInvoice {
+  id: string;
+  data: ExtractedInvoiceData;
+  templateId?: string;
+  processedAt: string;
+  isFavorite: boolean;
+  tags: string[];
+}
+
+// Invoice History
+export const saveProcessedInvoice = (invoice: ExtractedInvoiceData, templateId?: string): ProcessedInvoice => {
+  const processed: ProcessedInvoice = {
+    id: crypto.randomUUID(),
+    data: invoice,
+    templateId,
+    processedAt: new Date().toISOString(),
+    isFavorite: false,
+    tags: [],
+  };
+
+  const history = getInvoiceHistory();
+  history.unshift(processed);
+  localStorage.setItem("invoice_history", JSON.stringify(history));
+  return processed;
+};
+
+export const getInvoiceHistory = (): ProcessedInvoice[] => {
+  if (typeof window === "undefined") return [];
+  const data = localStorage.getItem("invoice_history");
+  return data ? JSON.parse(data) : [];
+};
+
+export const deleteProcessedInvoice = (id: string): void => {
+  const history = getInvoiceHistory();
+  const filtered = history.filter((item) => item.id !== id);
+  localStorage.setItem("invoice_history", JSON.stringify(filtered));
+};
+
+export const toggleFavorite = (id: string): void => {
+  const history = getInvoiceHistory();
+  const updated = history.map((item) =>
+    item.id === id ? { ...item, isFavorite: !item.isFavorite } : item
+  );
+  localStorage.setItem("invoice_history", JSON.stringify(updated));
+};
+
+export const addTag = (id: string, tag: string): void => {
+  const history = getInvoiceHistory();
+  const updated = history.map((item) =>
+    item.id === id ? { ...item, tags: [...new Set([...item.tags, tag])] } : item
+  );
+  localStorage.setItem("invoice_history", JSON.stringify(updated));
+};
+
+// Templates
+export const saveTemplate = (template: Omit<InvoiceTemplate, "id" | "createdAt" | "updatedAt">): InvoiceTemplate => {
+  const newTemplate: InvoiceTemplate = {
+    ...template,
+    id: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const templates = getTemplates();
+  templates.push(newTemplate);
+  localStorage.setItem("invoice_templates", JSON.stringify(templates));
+  return newTemplate;
+};
+
+export const getTemplates = (): InvoiceTemplate[] => {
+  if (typeof window === "undefined") return [];
+  const data = localStorage.getItem("invoice_templates");
+  return data ? JSON.parse(data) : [];
+};
+
+export const getTemplate = (id: string): InvoiceTemplate | undefined => {
+  const templates = getTemplates();
+  return templates.find((t) => t.id === id);
+};
+
+export const updateTemplate = (id: string, updates: Partial<InvoiceTemplate>): void => {
+  const templates = getTemplates();
+  const updated = templates.map((t) =>
+    t.id === id ? { ...t, ...updates, updatedAt: new Date().toISOString() } : t
+  );
+  localStorage.setItem("invoice_templates", JSON.stringify(updated));
+};
+
+export const deleteTemplate = (id: string): void => {
+  const templates = getTemplates();
+  const filtered = templates.filter((t) => t.id !== id);
+  localStorage.setItem("invoice_templates", JSON.stringify(filtered));
+};
+
+// Stats
+export const getStats = () => {
+  const history = getInvoiceHistory();
+  const templates = getTemplates();
+
+  const totalProcessed = history.length;
+  const favorites = history.filter((h) => h.isFavorite).length;
+  const totalTemplates = templates.length;
+
+  // Group by supplier
+  const supplierStats: Record<string, number> = {};
+  history.forEach((h) => {
+    const supplier = h.data.metadata.supplier || "Unknown";
+    supplierStats[supplier] = (supplierStats[supplier] || 0) + 1;
+  });
+
+  // Group by month
+  const monthlyStats: Record<string, number> = {};
+  history.forEach((h) => {
+    const month = h.processedAt.substring(0, 7); // YYYY-MM
+    monthlyStats[month] = (monthlyStats[month] || 0) + 1;
+  });
+
+  return {
+    totalProcessed,
+    favorites,
+    totalTemplates,
+    supplierStats,
+    monthlyStats,
+  };
+};

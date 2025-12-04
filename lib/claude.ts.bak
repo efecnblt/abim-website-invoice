@@ -1,0 +1,96 @@
+import Anthropic from "@anthropic-ai/sdk";
+
+if (!process.env.ANTHROPIC_API_KEY) {
+  throw new Error("ANTHROPIC_API_KEY environment variable is required");
+}
+
+export const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+export async function extractInvoiceData(pdfBase64: string, fileName: string) {
+  const prompt = `Bu PDF faturadan aşağıdaki bilgileri çıkarıp JSON formatında ver. Eğer bir bilgi bulunamazsa null kullan.
+
+Çıkarılacak bilgiler:
+- date: Fatura tarihi (YYYY-MM-DD formatında)
+- concreteType: Beton türü/tipi (örn: C25, C30, vb.)
+- quantity: Dökülen miktar (sayı olarak)
+- unit: Birim (örn: m³, ton, vb.)
+- unitPrice: Birim başına fiyat (sayı olarak)
+- totalAmount: Toplam tutar (sayı olarak)
+- currency: Para birimi (örn: TRY, USD, EUR)
+- plateNumbers: Araç plaka numaraları (array olarak)
+- supplier: Tedarikçi/firma adı
+- notes: Ek notlar veya önemli detaylar
+
+SADECE JSON döndür, başka açıklama ekleme. Format:
+{
+  "date": "2024-01-15",
+  "concreteType": "C30",
+  "quantity": 25.5,
+  "unit": "m³",
+  "unitPrice": 850.00,
+  "totalAmount": 21675.00,
+  "currency": "TRY",
+  "plateNumbers": ["34ABC123", "34XYZ456"],
+  "supplier": "ABC Beton A.Ş.",
+  "notes": "Pompa dahil"
+}`;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-3-5-sonnet-20241022",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: pdfBase64,
+              },
+            },
+            {
+              type: "text",
+              text: prompt,
+            },
+          ],
+        },
+      ],
+    });
+
+    const textContent = response.content.find((c) => c.type === "text");
+    if (!textContent || textContent.type !== "text") {
+      throw new Error("No text response from Claude");
+    }
+
+    // Extract JSON from response (Claude might wrap it in markdown code blocks)
+    let jsonText = textContent.text.trim();
+
+    // Remove markdown code blocks if present
+    if (jsonText.startsWith("```json")) {
+      jsonText = jsonText.replace(/```json\n?/g, "").replace(/```\n?/g, "");
+    } else if (jsonText.startsWith("```")) {
+      jsonText = jsonText.replace(/```\n?/g, "");
+    }
+
+    const extractedData = JSON.parse(jsonText);
+
+    return {
+      success: true,
+      data: {
+        fileName,
+        ...extractedData,
+      },
+    };
+  } catch (error) {
+    console.error("Claude API Error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+}

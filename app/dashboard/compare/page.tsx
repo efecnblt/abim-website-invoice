@@ -28,9 +28,9 @@ export default function ExcelComparePage() {
 
   // File upload states
   const [oldExcelFile, setOldExcelFile] = useState<File | null>(null);
-  const [oldExcelBase64, setOldExcelBase64] = useState<string>("");
+  const [oldExcelPath, setOldExcelPath] = useState<string>("");
   const [newExcelFile, setNewExcelFile] = useState<File | null>(null);
-  const [newExcelBase64, setNewExcelBase64] = useState<string>("");
+  const [newExcelPath, setNewExcelPath] = useState<string>("");
 
   // Excel info
   const [oldExcelInfo, setOldExcelInfo] = useState<ExcelInfo | null>(null);
@@ -47,17 +47,23 @@ export default function ExcelComparePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Convert file to base64
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64 = (reader.result as string).split(",")[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
+  // Upload file to Supabase
+  const uploadToSupabase = async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch('/api/excel/upload', {
+      method: 'POST',
+      body: formData,
     });
+
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.details || result.error || 'Yükleme başarısız');
+    }
+
+    const result = await response.json();
+    return result.data.path; // Return Supabase storage path
   };
 
   // Handle old Excel file upload
@@ -65,10 +71,10 @@ export default function ExcelComparePage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Check file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB
+    // Check file size (max 20MB)
+    const maxSize = 20 * 1024 * 1024; // 20MB
     if (file.size > maxSize) {
-      setError(`Dosya çok büyük (${(file.size / 1024 / 1024).toFixed(2)}MB). Maksimum 10MB olabilir.`);
+      setError(`Dosya çok büyük (${(file.size / 1024 / 1024).toFixed(2)}MB). Maksimum 20MB olabilir.`);
       return;
     }
 
@@ -77,10 +83,11 @@ export default function ExcelComparePage() {
     setError(null);
 
     try {
-      const base64 = await fileToBase64(file);
-      setOldExcelBase64(base64);
+      const path = await uploadToSupabase(file);
+      setOldExcelPath(path);
     } catch (err) {
-      setError("Eski Excel dosyası okunamadı");
+      setError(err instanceof Error ? err.message : "Eski Excel dosyası yüklenemedi");
+      setOldExcelFile(null);
     } finally {
       setLoading(false);
     }
@@ -91,10 +98,10 @@ export default function ExcelComparePage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Check file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB
+    // Check file size (max 20MB)
+    const maxSize = 20 * 1024 * 1024; // 20MB
     if (file.size > maxSize) {
-      setError(`Dosya çok büyük (${(file.size / 1024 / 1024).toFixed(2)}MB). Maksimum 10MB olabilir.`);
+      setError(`Dosya çok büyük (${(file.size / 1024 / 1024).toFixed(2)}MB). Maksimum 20MB olabilir.`);
       return;
     }
 
@@ -103,10 +110,11 @@ export default function ExcelComparePage() {
     setError(null);
 
     try {
-      const base64 = await fileToBase64(file);
-      setNewExcelBase64(base64);
+      const path = await uploadToSupabase(file);
+      setNewExcelPath(path);
     } catch (err) {
-      setError("Yeni Excel dosyası okunamadı");
+      setError(err instanceof Error ? err.message : "Yeni Excel dosyası yüklenemedi");
+      setNewExcelFile(null);
     } finally {
       setLoading(false);
     }
@@ -114,7 +122,7 @@ export default function ExcelComparePage() {
 
   // Analyze Excel files and get sheets
   const analyzeExcelFiles = async () => {
-    if (!oldExcelBase64 || !newExcelBase64) {
+    if (!oldExcelPath || !newExcelPath) {
       setError("Her iki Excel dosyası da gerekli");
       return;
     }
@@ -127,8 +135,8 @@ export default function ExcelComparePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          oldExcelBase64,
-          newExcelBase64,
+          oldExcelPath,
+          newExcelPath,
         }),
       });
 
@@ -170,8 +178,8 @@ export default function ExcelComparePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          oldExcelBase64,
-          newExcelBase64,
+          oldExcelPath,
+          newExcelPath,
           oldSheetIndex: selectedOldSheet,
           newSheetIndex: selectedNewSheet,
         }),
@@ -515,7 +523,7 @@ export default function ExcelComparePage() {
           {step === "upload" && (
             <Button
               onClick={analyzeExcelFiles}
-              disabled={!oldExcelBase64 || !newExcelBase64 || loading}
+              disabled={!oldExcelPath || !newExcelPath || loading}
             >
               {loading ? (
                 <>

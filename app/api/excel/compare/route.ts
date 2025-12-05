@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readExcelFile, compareSheets } from '@/lib/excel-compare';
+import { downloadExcelFromSupabase } from '@/lib/supabase';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -8,27 +9,33 @@ export const maxDuration = 60;
  * Compare two Excel sheets
  *
  * Request body:
- * - oldExcelBase64: Base64 encoded Excel file (old/reference)
- * - newExcelBase64: Base64 encoded Excel file (new/comparison)
+ * - oldExcelPath: Path to old Excel in Supabase Storage
+ * - newExcelPath: Path to new Excel in Supabase Storage
  * - oldSheetIndex: Index of sheet to compare from old Excel
  * - newSheetIndex: Index of sheet to compare from new Excel
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { oldExcelBase64, newExcelBase64, oldSheetIndex, newSheetIndex } = body;
+    const { oldExcelPath, newExcelPath, oldSheetIndex, newSheetIndex } = body;
 
     // Validate inputs
-    if (!oldExcelBase64 || !newExcelBase64) {
+    if (!oldExcelPath || !newExcelPath) {
       return NextResponse.json(
-        { error: 'Both old and new Excel files are required' },
+        { error: 'Both old and new Excel paths are required' },
         { status: 400 }
       );
     }
 
-    // Convert base64 to buffers
-    const oldBuffer = Buffer.from(oldExcelBase64, 'base64');
-    const newBuffer = Buffer.from(newExcelBase64, 'base64');
+    console.log('📥 Downloading Excel files from Supabase...');
+
+    // Download Excel files from Supabase
+    const oldBlob = await downloadExcelFromSupabase(oldExcelPath);
+    const newBlob = await downloadExcelFromSupabase(newExcelPath);
+
+    // Convert blobs to buffers
+    const oldBuffer = Buffer.from(await oldBlob.arrayBuffer());
+    const newBuffer = Buffer.from(await newBlob.arrayBuffer());
 
     // Read Excel files
     console.log('📖 Reading Excel files...');

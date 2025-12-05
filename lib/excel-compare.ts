@@ -1,245 +1,242 @@
 import ExcelJS from 'exceljs';
 
 /**
- * Excel row data structure
+ * Excel cell value
  */
-export interface ExcelRow {
-  [key: string]: any;
-  _rowNumber: number; // Original row number from Excel
+export type CellValue = string | number | boolean | Date | null;
+
+/**
+ * Excel sheet structure
+ */
+export interface ExcelSheet {
+  name: string;
+  index: number;
+  rowCount: number;
+  columnCount: number;
+  data: CellValue[][]; // 2D array: rows x columns
+  headers?: string[]; // First row as headers (if exists)
 }
 
 /**
- * Excel data structure
+ * Excel file structure
  */
-export interface ExcelData {
-  headers: string[];
-  rows: ExcelRow[];
-  sheetName: string;
+export interface ExcelFile {
+  fileName: string;
+  sheets: ExcelSheet[];
 }
 
 /**
- * Diff types
+ * Cell diff type
  */
-export type DiffType = 'added' | 'deleted' | 'modified' | 'unchanged';
+export type CellDiffType = 'added' | 'deleted' | 'modified' | 'unchanged';
 
 /**
- * Row diff structure
+ * Cell difference
  */
-export interface RowDiff {
-  type: DiffType;
-  oldRow?: ExcelRow;
-  newRow?: ExcelRow;
-  changedFields?: string[]; // For modified rows, which fields changed
-  key: string; // Composite key for matching
+export interface CellDiff {
+  row: number;
+  col: number;
+  type: CellDiffType;
+  oldValue?: CellValue;
+  newValue?: CellValue;
 }
 
 /**
- * Comparison result
+ * Sheet comparison result
  */
-export interface ComparisonResult {
+export interface SheetComparison {
+  oldSheetName: string;
+  newSheetName: string;
   summary: {
-    totalOld: number;
-    totalNew: number;
-    added: number;
-    deleted: number;
-    modified: number;
-    unchanged: number;
+    totalCells: number;
+    changedCells: number;
+    addedRows: number;
+    deletedRows: number;
+    addedColumns: number;
+    deletedColumns: number;
   };
-  diffs: RowDiff[];
-  headers: string[];
-  keyColumns: string[];
+  diffs: CellDiff[];
+  oldData: CellValue[][];
+  newData: CellValue[][];
 }
 
 /**
- * Read Excel file and extract data
+ * Parse cell value from ExcelJS cell
  */
-export async function readExcelFile(buffer: Buffer | ArrayBuffer): Promise<ExcelData> {
+function parseCellValue(cell: ExcelJS.Cell): CellValue {
+  if (!cell || cell.value === null || cell.value === undefined) {
+    return null;
+  }
+
+  let value = cell.value;
+
+  // Handle rich text
+  if (value && typeof value === 'object' && 'richText' in value) {
+    value = (value as any).richText.map((t: any) => t.text).join('');
+  }
+
+  // Handle dates
+  if (cell.type === ExcelJS.ValueType.Date) {
+    return value instanceof Date ? value.toISOString().split('T')[0] : String(value);
+  }
+
+  // Handle formulas - get result value
+  if (typeof value === 'object' && 'result' in value) {
+    return (value as any).result;
+  }
+
+  // Handle hyperlinks
+  if (typeof value === 'object' && 'hyperlink' in value) {
+    return (value as any).text || (value as any).hyperlink;
+  }
+
+  // Convert to appropriate type
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+
+  return String(value);
+}
+
+/**
+ * Read all sheets from Excel file
+ */
+export async function readExcelFile(buffer: Buffer | ArrayBuffer, fileName: string = 'Excel'): Promise<ExcelFile> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer as any);
 
-  // Get first worksheet
-  const worksheet = workbook.worksheets[0];
-  if (!worksheet) {
-    throw new Error('Excel file has no worksheets');
-  }
+  const sheets: ExcelSheet[] = [];
 
-  const rows: ExcelRow[] = [];
-  let headers: string[] = [];
+  workbook.worksheets.forEach((worksheet, index) => {
+    const data: CellValue[][] = [];
+    let maxColumnCount = 0;
 
-  worksheet.eachRow((row, rowNumber) => {
-    if (rowNumber === 1) {
-      // First row is headers
-      headers = row.values as string[];
-      // Remove first empty element (Excel rows are 1-indexed)
-      headers = headers.slice(1);
-    } else {
-      // Data rows
-      const rowData: ExcelRow = { _rowNumber: rowNumber };
+    // Read all rows and cells
+    worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+      const rowData: CellValue[] = [];
 
-      row.eachCell((cell, colNumber) => {
-        const header = headers[colNumber - 1];
-        if (header) {
-          // Handle different cell types
-          let value = cell.value;
+      // Get actual column count for this row
+      const actualColumnCount = row.actualCellCount || row.cellCount;
+      maxColumnCount = Math.max(maxColumnCount, actualColumnCount);
 
-          // Handle rich text
-          if (value && typeof value === 'object' && 'richText' in value) {
-            value = (value as any).richText.map((t: any) => t.text).join('');
-          }
+      // Read all cells in the row
+      for (let colNumber = 1; colNumber <= actualColumnCount; colNumber++) {
+        const cell = row.getCell(colNumber);
+        rowData.push(parseCellValue(cell));
+      }
 
-          // Handle dates
-          if (cell.type === ExcelJS.ValueType.Date) {
-            value = cell.value instanceof Date ? cell.value.toISOString().split('T')[0] : cell.value;
-          }
+      data.push(rowData);
+    });
 
-          rowData[header] = value;
-        }
-      });
+    // Extract headers (first row if exists)
+    const headers = data.length > 0 ? data[0].map(v => String(v || '')) : undefined;
 
-      rows.push(rowData);
-    }
+    sheets.push({
+      name: worksheet.name,
+      index,
+      rowCount: data.length,
+      columnCount: maxColumnCount,
+      data,
+      headers,
+    });
   });
 
   return {
-    headers,
-    rows,
-    sheetName: worksheet.name,
+    fileName,
+    sheets,
   };
 }
 
 /**
- * Generate composite key from selected columns
+ * Compare two values for equality
  */
-function generateKey(row: ExcelRow, keyColumns: string[]): string {
-  return keyColumns
-    .map((col) => String(row[col] || '').trim().toLowerCase())
-    .join('||');
+function valuesEqual(a: CellValue, b: CellValue): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return a === b;
+
+  // Normalize strings (trim and case-insensitive)
+  const aStr = String(a).trim().toLowerCase();
+  const bStr = String(b).trim().toLowerCase();
+
+  // Try numeric comparison if both are numbers
+  const aNum = parseFloat(aStr);
+  const bNum = parseFloat(bStr);
+  if (!isNaN(aNum) && !isNaN(bNum)) {
+    return Math.abs(aNum - bNum) < 0.0001; // Float comparison with tolerance
+  }
+
+  return aStr === bStr;
 }
 
 /**
- * Compare two rows and find changed fields
+ * Compare two sheets
  */
-function findChangedFields(oldRow: ExcelRow, newRow: ExcelRow, headers: string[]): string[] {
-  const changed: string[] = [];
+export function compareSheets(
+  oldSheet: ExcelSheet,
+  newSheet: ExcelSheet
+): SheetComparison {
+  const oldData = oldSheet.data;
+  const newData = newSheet.data;
 
-  for (const header of headers) {
-    const oldValue = String(oldRow[header] || '').trim();
-    const newValue = String(newRow[header] || '').trim();
+  const maxRows = Math.max(oldData.length, newData.length);
+  const maxCols = Math.max(oldSheet.columnCount, newSheet.columnCount);
 
-    if (oldValue !== newValue) {
-      changed.push(header);
-    }
-  }
+  const diffs: CellDiff[] = [];
+  let changedCells = 0;
 
-  return changed;
-}
+  // Compare cell by cell
+  for (let row = 0; row < maxRows; row++) {
+    const oldRow = oldData[row] || [];
+    const newRow = newData[row] || [];
 
-/**
- * Compare two Excel files
- */
-export async function compareExcelFiles(
-  oldBuffer: Buffer | ArrayBuffer,
-  newBuffer: Buffer | ArrayBuffer,
-  keyColumns: string[]
-): Promise<ComparisonResult> {
-  // Read both Excel files
-  const oldExcel = await readExcelFile(oldBuffer);
-  const newExcel = await readExcelFile(newBuffer);
+    for (let col = 0; col < maxCols; col++) {
+      const oldValue = oldRow[col] ?? null;
+      const newValue = newRow[col] ?? null;
 
-  // Combine headers from both files
-  const allHeaders = Array.from(
-    new Set([...oldExcel.headers, ...newExcel.headers])
-  );
+      if (!valuesEqual(oldValue, newValue)) {
+        let type: CellDiffType;
 
-  // Validate key columns exist
-  const missingKeys = keyColumns.filter(
-    (key) => !allHeaders.includes(key)
-  );
-  if (missingKeys.length > 0) {
-    throw new Error(`Key columns not found in Excel: ${missingKeys.join(', ')}`);
-  }
+        if (oldValue === null && newValue !== null) {
+          type = 'added';
+        } else if (oldValue !== null && newValue === null) {
+          type = 'deleted';
+        } else {
+          type = 'modified';
+        }
 
-  // Create maps for quick lookup
-  const oldMap = new Map<string, ExcelRow>();
-  const newMap = new Map<string, ExcelRow>();
-
-  oldExcel.rows.forEach((row) => {
-    const key = generateKey(row, keyColumns);
-    oldMap.set(key, row);
-  });
-
-  newExcel.rows.forEach((row) => {
-    const key = generateKey(row, keyColumns);
-    newMap.set(key, row);
-  });
-
-  // Find diffs
-  const diffs: RowDiff[] = [];
-  const processedKeys = new Set<string>();
-
-  // Check old rows (deleted or modified)
-  oldMap.forEach((oldRow, key) => {
-    processedKeys.add(key);
-    const newRow = newMap.get(key);
-
-    if (!newRow) {
-      // Row deleted
-      diffs.push({
-        type: 'deleted',
-        oldRow,
-        key,
-      });
-    } else {
-      // Check if modified
-      const changedFields = findChangedFields(oldRow, newRow, allHeaders);
-
-      if (changedFields.length > 0) {
-        // Row modified
         diffs.push({
-          type: 'modified',
-          oldRow,
-          newRow,
-          changedFields,
-          key,
+          row,
+          col,
+          type,
+          oldValue,
+          newValue,
         });
-      } else {
-        // Row unchanged
-        diffs.push({
-          type: 'unchanged',
-          oldRow,
-          newRow,
-          key,
-        });
+
+        changedCells++;
       }
     }
-  });
-
-  // Check new rows (added)
-  newMap.forEach((newRow, key) => {
-    if (!processedKeys.has(key)) {
-      diffs.push({
-        type: 'added',
-        newRow,
-        key,
-      });
-    }
-  });
+  }
 
   // Calculate summary
-  const summary = {
-    totalOld: oldExcel.rows.length,
-    totalNew: newExcel.rows.length,
-    added: diffs.filter((d) => d.type === 'added').length,
-    deleted: diffs.filter((d) => d.type === 'deleted').length,
-    modified: diffs.filter((d) => d.type === 'modified').length,
-    unchanged: diffs.filter((d) => d.type === 'unchanged').length,
-  };
+  const addedRows = Math.max(0, newData.length - oldData.length);
+  const deletedRows = Math.max(0, oldData.length - newData.length);
+  const addedColumns = Math.max(0, newSheet.columnCount - oldSheet.columnCount);
+  const deletedColumns = Math.max(0, oldSheet.columnCount - newSheet.columnCount);
 
   return {
-    summary,
+    oldSheetName: oldSheet.name,
+    newSheetName: newSheet.name,
+    summary: {
+      totalCells: maxRows * maxCols,
+      changedCells,
+      addedRows,
+      deletedRows,
+      addedColumns,
+      deletedColumns,
+    },
     diffs,
-    headers: allHeaders,
-    keyColumns,
+    oldData,
+    newData,
   };
 }
 
@@ -247,32 +244,43 @@ export async function compareExcelFiles(
  * Export comparison result to Excel with highlighting
  */
 export async function exportComparisonToExcel(
-  comparison: ComparisonResult,
-  includeUnchanged: boolean = false
+  comparison: SheetComparison,
+  showOnlyChanges: boolean = false
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('Karşılaştırma');
 
   // Add summary at the top
-  worksheet.addRow(['📊 KARŞILAŞTIRMA ÖZETİ']);
-  worksheet.addRow(['Eski Excel Satır Sayısı:', comparison.summary.totalOld]);
-  worksheet.addRow(['Yeni Excel Satır Sayısı:', comparison.summary.totalNew]);
-  worksheet.addRow(['✅ Eklenen:', comparison.summary.added]);
-  worksheet.addRow(['❌ Silinen:', comparison.summary.deleted]);
-  worksheet.addRow(['🔄 Değiştirilen:', comparison.summary.modified]);
-  worksheet.addRow(['⚪ Değişmeyen:', comparison.summary.unchanged]);
+  worksheet.addRow(['📊 KARŞILAŞTIRMA ÖZETİ']).font = { bold: true, size: 14 };
+  worksheet.addRow(['Eski Sayfa:', comparison.oldSheetName]);
+  worksheet.addRow(['Yeni Sayfa:', comparison.newSheetName]);
+  worksheet.addRow(['Değiştirilen Hücre:', comparison.summary.changedCells]);
+  worksheet.addRow(['Eklenen Satır:', comparison.summary.addedRows]);
+  worksheet.addRow(['Silinen Satır:', comparison.summary.deletedRows]);
+  worksheet.addRow(['Eklenen Sütun:', comparison.summary.addedColumns]);
+  worksheet.addRow(['Silinen Sütun:', comparison.summary.deletedColumns]);
   worksheet.addRow([]); // Empty row
 
-  // Style summary
-  worksheet.getCell('A1').font = { bold: true, size: 14 };
-  worksheet.getCell('A1').fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FF4A90E2' },
-  };
+  // Create a map of changed cells for quick lookup
+  const changedCellsMap = new Map<string, CellDiff>();
+  comparison.diffs.forEach((diff) => {
+    changedCellsMap.set(`${diff.row},${diff.col}`, diff);
+  });
 
-  // Add headers
-  const headerRow = worksheet.addRow(['Durum', 'Değişen Alanlar', ...comparison.headers]);
+  // Add side-by-side comparison
+  const maxRows = Math.max(comparison.oldData.length, comparison.newData.length);
+  const maxCols = Math.max(
+    Math.max(...comparison.oldData.map((r) => r.length)),
+    Math.max(...comparison.newData.map((r) => r.length))
+  );
+
+  // Header row
+  const headerRow = worksheet.addRow([
+    'Satır',
+    ...Array(maxCols).fill(0).map((_, i) => `Sütun ${i + 1} (ESKİ)`),
+    '|',
+    ...Array(maxCols).fill(0).map((_, i) => `Sütun ${i + 1} (YENİ)`),
+  ]);
   headerRow.font = { bold: true };
   headerRow.fill = {
     type: 'pattern',
@@ -280,58 +288,57 @@ export async function exportComparisonToExcel(
     fgColor: { argb: 'FFD3D3D3' },
   };
 
-  // Add data rows
-  const diffsToShow = includeUnchanged
-    ? comparison.diffs
-    : comparison.diffs.filter((d) => d.type !== 'unchanged');
+  // Data rows
+  for (let row = 0; row < maxRows; row++) {
+    if (showOnlyChanges) {
+      // Check if this row has any changes
+      const hasChanges = comparison.diffs.some((d) => d.row === row);
+      if (!hasChanges) continue;
+    }
 
-  diffsToShow.forEach((diff) => {
-    const row = diff.newRow || diff.oldRow!;
-    const statusText =
-      diff.type === 'added'
-        ? '✅ YENİ'
-        : diff.type === 'deleted'
-        ? '❌ SİLİNDİ'
-        : diff.type === 'modified'
-        ? '🔄 DEĞİŞTİ'
-        : '⚪ AYNI';
-
-    const changedFieldsText = diff.changedFields?.join(', ') || '-';
+    const oldRow = comparison.oldData[row] || [];
+    const newRow = comparison.newData[row] || [];
 
     const rowData = [
-      statusText,
-      changedFieldsText,
-      ...comparison.headers.map((header) => row[header] || ''),
+      row + 1, // Row number
+      ...Array(maxCols).fill(0).map((_, col) => oldRow[col] ?? ''),
+      '|',
+      ...Array(maxCols).fill(0).map((_, col) => newRow[col] ?? ''),
     ];
 
     const excelRow = worksheet.addRow(rowData);
 
-    // Color coding
-    let fillColor: string;
-    if (diff.type === 'added') {
-      fillColor = 'FFC6EFCE'; // Light green
-    } else if (diff.type === 'deleted') {
-      fillColor = 'FFFFC7CE'; // Light red
-    } else if (diff.type === 'modified') {
-      fillColor = 'FFFFEB9C'; // Light orange
-    } else {
-      fillColor = 'FFFFFFFF'; // White
-    }
+    // Highlight changed cells
+    for (let col = 0; col < maxCols; col++) {
+      const diff = changedCellsMap.get(`${row},${col}`);
+      if (diff) {
+        let fillColor: string;
+        if (diff.type === 'added') {
+          fillColor = 'FFC6EFCE'; // Light green
+        } else if (diff.type === 'deleted') {
+          fillColor = 'FFFFC7CE'; // Light red
+        } else {
+          fillColor = 'FFFFEB9C'; // Light orange
+        }
 
-    excelRow.eachCell((cell) => {
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: fillColor },
-      };
-      cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' },
-      };
-    });
-  });
+        // Highlight in old column
+        const oldCell = excelRow.getCell(col + 2);
+        oldCell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: fillColor },
+        };
+
+        // Highlight in new column
+        const newCell = excelRow.getCell(maxCols + 3 + col);
+        newCell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: fillColor },
+        };
+      }
+    }
+  }
 
   // Auto-size columns
   worksheet.columns.forEach((column) => {

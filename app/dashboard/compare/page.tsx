@@ -7,54 +7,45 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Upload, FileSpreadsheet, ArrowRight, Download, Save, Loader2 } from "lucide-react";
-import { generateExcel } from "@/lib/excel";
-import { ComparisonResult } from "@/lib/excel-compare";
+import { Upload, FileSpreadsheet, ArrowRight, Download, Loader2, Table2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { SheetComparison } from "@/lib/excel-compare";
 
-interface HistoryItem {
-  id: string;
-  data: any;
-  timestamp: string;
+interface SheetInfo {
+  name: string;
+  index: number;
+  rowCount: number;
+  columnCount: number;
+}
+
+interface ExcelInfo {
+  fileName: string;
+  sheets: SheetInfo[];
 }
 
 export default function ExcelComparePage() {
-  const [step, setStep] = useState<"upload" | "select-keys" | "results">("upload");
+  const [step, setStep] = useState<"upload" | "select-sheets" | "results">("upload");
 
   // File upload states
-  const [oldExcelSource, setOldExcelSource] = useState<"history" | "upload">("history");
   const [oldExcelFile, setOldExcelFile] = useState<File | null>(null);
   const [oldExcelBase64, setOldExcelBase64] = useState<string>("");
-  const [selectedHistoryId, setSelectedHistoryId] = useState<string>("");
   const [newExcelFile, setNewExcelFile] = useState<File | null>(null);
   const [newExcelBase64, setNewExcelBase64] = useState<string>("");
 
-  // History data
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  // Excel info
+  const [oldExcelInfo, setOldExcelInfo] = useState<ExcelInfo | null>(null);
+  const [newExcelInfo, setNewExcelInfo] = useState<ExcelInfo | null>(null);
 
-  // Comparison states
-  const [availableColumns, setAvailableColumns] = useState<string[]>([]);
-  const [selectedKeyColumns, setSelectedKeyColumns] = useState<string[]>([]);
-  const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
-  const [editedRows, setEditedRows] = useState<any[]>([]);
+  // Sheet selection
+  const [selectedOldSheet, setSelectedOldSheet] = useState<number | null>(null);
+  const [selectedNewSheet, setSelectedNewSheet] = useState<number | null>(null);
+
+  // Comparison result
+  const [comparisonResult, setComparisonResult] = useState<SheetComparison | null>(null);
 
   // UI states
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Load history on mount
-  useEffect(() => {
-    const historyData = localStorage.getItem("invoiceHistory");
-    if (historyData) {
-      try {
-        const parsed = JSON.parse(historyData);
-        setHistory(parsed);
-      } catch (err) {
-        console.error("Failed to load history:", err);
-      }
-    }
-  }, []);
 
   // Convert file to base64
   const fileToBase64 = (file: File): Promise<string> => {
@@ -67,29 +58,6 @@ export default function ExcelComparePage() {
       };
       reader.onerror = reject;
     });
-  };
-
-  // Handle old Excel selection from history
-  const handleOldExcelFromHistory = async (historyId: string) => {
-    setSelectedHistoryId(historyId);
-    setLoading(true);
-    setError(null);
-
-    try {
-      const item = history.find((h) => h.id === historyId);
-      if (!item) {
-        throw new Error("History item not found");
-      }
-
-      // Generate Excel from invoice data
-      const buffer = await generateExcel([item.data], false);
-      const base64 = buffer.toString("base64");
-      setOldExcelBase64(base64);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load Excel from history");
-    } finally {
-      setLoading(false);
-    }
   };
 
   // Handle old Excel file upload
@@ -105,7 +73,7 @@ export default function ExcelComparePage() {
       const base64 = await fileToBase64(file);
       setOldExcelBase64(base64);
     } catch (err) {
-      setError("Failed to read old Excel file");
+      setError("Eski Excel dosyası okunamadı");
     } finally {
       setLoading(false);
     }
@@ -124,16 +92,16 @@ export default function ExcelComparePage() {
       const base64 = await fileToBase64(file);
       setNewExcelBase64(base64);
     } catch (err) {
-      setError("Failed to read new Excel file");
+      setError("Yeni Excel dosyası okunamadı");
     } finally {
       setLoading(false);
     }
   };
 
-  // Proceed to key selection
-  const proceedToKeySelection = async () => {
+  // Analyze Excel files and get sheets
+  const analyzeExcelFiles = async () => {
     if (!oldExcelBase64 || !newExcelBase64) {
-      setError("Both Excel files are required");
+      setError("Her iki Excel dosyası da gerekli");
       return;
     }
 
@@ -141,37 +109,26 @@ export default function ExcelComparePage() {
     setError(null);
 
     try {
-      // Get available columns by doing a quick parse
       const response = await fetch("/api/excel/compare", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           oldExcelBase64,
           newExcelBase64,
-          keyColumns: ["_temp"], // Dummy key just to get headers
         }),
       });
 
       if (!response.ok) {
-        // This will fail but give us headers in error
         const result = await response.json();
-        if (result.details && result.details.includes("not found")) {
-          // Extract headers from both files manually
-          // For now, let's use a simple approach - user will need to select valid columns
-          setAvailableColumns(["Fatura No", "Tarih", "Açıklama", "Miktar", "Fiyat"]);
-          setStep("select-keys");
-        } else {
-          throw new Error(result.details || "Failed to analyze Excel files");
-        }
-      } else {
-        const result = await response.json();
-        setAvailableColumns(result.data.headers);
-        setStep("select-keys");
+        throw new Error(result.details || "Excel analizi başarısız");
       }
+
+      const result = await response.json();
+      setOldExcelInfo(result.data.oldExcel);
+      setNewExcelInfo(result.data.newExcel);
+      setStep("select-sheets");
     } catch (err) {
-      // Fallback: provide common column names
-      setAvailableColumns(["Fatura No", "Tarih", "Açıklama", "Article", "Dénomination", "Pos"]);
-      setStep("select-keys");
+      setError(err instanceof Error ? err.message : "Excel dosyaları analiz edilemedi");
     } finally {
       setLoading(false);
     }
@@ -179,8 +136,8 @@ export default function ExcelComparePage() {
 
   // Run comparison
   const runComparison = async () => {
-    if (selectedKeyColumns.length === 0) {
-      setError("Please select at least one key column");
+    if (selectedOldSheet === null || selectedNewSheet === null) {
+      setError("Lütfen karşılaştırılacak sayfaları seçin");
       return;
     }
 
@@ -194,59 +151,21 @@ export default function ExcelComparePage() {
         body: JSON.stringify({
           oldExcelBase64,
           newExcelBase64,
-          keyColumns: selectedKeyColumns,
+          oldSheetIndex: selectedOldSheet,
+          newSheetIndex: selectedNewSheet,
         }),
       });
 
       if (!response.ok) {
         const result = await response.json();
-        throw new Error(result.details || "Comparison failed");
+        throw new Error(result.details || "Karşılaştırma başarısız");
       }
 
       const result = await response.json();
       setComparisonResult(result.data);
-
-      // Initialize edited rows with new data (or old data for deleted)
-      const rows = result.data.diffs.map((diff: any) => diff.newRow || diff.oldRow);
-      setEditedRows(rows);
-
       setStep("results");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to compare Excel files");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Save edited Excel
-  const saveEditedExcel = async () => {
-    if (!comparisonResult) return;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const fileName = `compared_${new Date().toISOString().split("T")[0]}.xlsx`;
-
-      const response = await fetch("/api/excel/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          headers: comparisonResult.headers,
-          rows: editedRows,
-          fileName,
-        }),
-      });
-
-      if (!response.ok) {
-        const result = await response.json();
-        throw new Error(result.details || "Save failed");
-      }
-
-      const result = await response.json();
-      alert(`Excel saved successfully!\nPath: ${result.data.path}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save Excel file");
+      setError(err instanceof Error ? err.message : "Karşılaştırma yapılamadı");
     } finally {
       setLoading(false);
     }
@@ -257,48 +176,44 @@ export default function ExcelComparePage() {
     if (!comparisonResult) return;
 
     setLoading(true);
+    setError(null);
+
     try {
-      // Send diffs to backend to create formatted Excel
-      const response = await fetch("/api/excel/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          headers: ["Durum", "Değişen Alanlar", ...comparisonResult.headers],
-          rows: comparisonResult.diffs.map((diff) => ({
-            Durum: diff.type === "added" ? "YENİ" : diff.type === "deleted" ? "SİLİNDİ" : diff.type === "modified" ? "DEĞİŞTİ" : "AYNI",
-            "Değişen Alanlar": diff.changedFields?.join(", ") || "-",
-            ...(diff.newRow || diff.oldRow!),
-          })),
-          fileName: `comparison_${new Date().toISOString().split("T")[0]}.xlsx`,
-        }),
+      // Use export endpoint to create formatted Excel
+      const { exportComparisonToExcel } = await import("@/lib/excel-compare");
+      const buffer = await exportComparisonToExcel(comparisonResult, false);
+
+      // Download
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
-
-      const result = await response.json();
-
-      // Download from Supabase URL
-      window.open(result.data.publicUrl, "_blank");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `comparison_${new Date().toISOString().split("T")[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch (err) {
-      setError("Failed to download comparison");
+      setError("Excel indirilemedi");
     } finally {
       setLoading(false);
     }
   };
 
-  // Toggle key column selection
-  const toggleKeyColumn = (column: string) => {
-    setSelectedKeyColumns((prev) =>
-      prev.includes(column)
-        ? prev.filter((c) => c !== column)
-        : [...prev, column]
-    );
+  // Format cell value for display
+  const formatCellValue = (value: any): string => {
+    if (value === null || value === undefined) return "";
+    return String(value);
   };
 
   return (
-    <div className="container mx-auto py-8 px-4">
+    <div className="container mx-auto py-8 px-4 max-w-7xl">
       <div className="mb-8">
         <h1 className="text-3xl font-bold">Excel Karşılaştırma</h1>
         <p className="text-muted-foreground mt-2">
-          İki Excel dosyasını karşılaştırın ve farklılıkları görün
+          İki Excel dosyasının sayfalarını karşılaştırın
         </p>
       </div>
 
@@ -319,54 +234,23 @@ export default function ExcelComparePage() {
                 Eski Excel (Referans)
               </CardTitle>
               <CardDescription>
-                Karşılaştırma için referans Excel dosyasını seçin
+                Karşılaştırma için referans Excel dosyasını yükleyin
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <Label>Kaynak</Label>
-                <Select value={oldExcelSource} onValueChange={(v: any) => setOldExcelSource(v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="history">Geçmiş Faturalardan</SelectItem>
-                    <SelectItem value="upload">Yeni Dosya Yükle</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="old-excel">Excel Dosyası</Label>
+                <Input
+                  id="old-excel"
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleOldExcelUpload}
+                />
               </div>
 
-              {oldExcelSource === "history" ? (
-                <div>
-                  <Label>Fatura Seç</Label>
-                  <Select value={selectedHistoryId} onValueChange={handleOldExcelFromHistory}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Bir fatura seçin" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {history.map((item) => (
-                        <SelectItem key={item.id} value={item.id}>
-                          {item.data.metadata?.invoiceNumber || "N/A"} - {item.data.metadata?.invoiceDate || "N/A"}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : (
-                <div>
-                  <Label htmlFor="old-excel">Excel Dosyası</Label>
-                  <Input
-                    id="old-excel"
-                    type="file"
-                    accept=".xlsx,.xls"
-                    onChange={handleOldExcelUpload}
-                  />
-                </div>
-              )}
-
-              {oldExcelBase64 && (
+              {oldExcelFile && (
                 <Badge variant="outline" className="bg-green-50">
-                  ✓ Eski Excel yüklendi
+                  ✓ {oldExcelFile.name}
                 </Badge>
               )}
             </CardContent>
@@ -394,9 +278,9 @@ export default function ExcelComparePage() {
                 />
               </div>
 
-              {newExcelBase64 && (
+              {newExcelFile && (
                 <Badge variant="outline" className="bg-green-50">
-                  ✓ Yeni Excel yüklendi
+                  ✓ {newExcelFile.name}
                 </Badge>
               )}
             </CardContent>
@@ -404,40 +288,75 @@ export default function ExcelComparePage() {
         </div>
       )}
 
-      {/* Step 2: Select Key Columns */}
-      {step === "select-keys" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Anahtar Sütunları Seçin</CardTitle>
-            <CardDescription>
-              Satırları eşleştirmek için kullanılacak sütunları seçin (birden fazla seçilebilir)
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 md:grid-cols-3">
-              {availableColumns.map((column) => (
-                <div key={column} className="flex items-center space-x-2">
-                  <Checkbox
-                    id={column}
-                    checked={selectedKeyColumns.includes(column)}
-                    onCheckedChange={() => toggleKeyColumn(column)}
-                  />
-                  <Label htmlFor={column} className="cursor-pointer">
-                    {column}
-                  </Label>
-                </div>
-              ))}
-            </div>
-
-            {selectedKeyColumns.length > 0 && (
-              <div className="mt-4">
-                <p className="text-sm text-muted-foreground">
-                  Seçili anahtar sütunlar: <strong>{selectedKeyColumns.join(" + ")}</strong>
-                </p>
+      {/* Step 2: Select Sheets */}
+      {step === "select-sheets" && oldExcelInfo && newExcelInfo && (
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Old Excel Sheets */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Table2 className="h-5 w-5" />
+                Eski Excel Sayfaları
+              </CardTitle>
+              <CardDescription>
+                {oldExcelInfo.fileName} - {oldExcelInfo.sheets.length} sayfa
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {oldExcelInfo.sheets.map((sheet) => (
+                  <button
+                    key={sheet.index}
+                    onClick={() => setSelectedOldSheet(sheet.index)}
+                    className={`w-full p-4 border rounded-lg text-left transition-all ${
+                      selectedOldSheet === sheet.index
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <div className="font-medium">{sheet.name}</div>
+                    <div className="text-sm text-muted-foreground mt-1">
+                      {sheet.rowCount} satır × {sheet.columnCount} sütun
+                    </div>
+                  </button>
+                ))}
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          {/* New Excel Sheets */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Table2 className="h-5 w-5" />
+                Yeni Excel Sayfaları
+              </CardTitle>
+              <CardDescription>
+                {newExcelInfo.fileName} - {newExcelInfo.sheets.length} sayfa
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {newExcelInfo.sheets.map((sheet) => (
+                  <button
+                    key={sheet.index}
+                    onClick={() => setSelectedNewSheet(sheet.index)}
+                    className={`w-full p-4 border rounded-lg text-left transition-all ${
+                      selectedNewSheet === sheet.index
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <div className="font-medium">{sheet.name}</div>
+                    <div className="text-sm text-muted-foreground mt-1">
+                      {sheet.rowCount} satır × {sheet.columnCount} sütun
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* Step 3: Results */}
@@ -447,28 +366,35 @@ export default function ExcelComparePage() {
           <Card>
             <CardHeader>
               <CardTitle>Karşılaştırma Özeti</CardTitle>
+              <CardDescription>
+                {comparisonResult.oldSheetName} vs {comparisonResult.newSheetName}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4 md:grid-cols-5">
-                <div className="text-center">
-                  <div className="text-2xl font-bold">{comparisonResult.summary.totalOld}</div>
-                  <div className="text-sm text-muted-foreground">Eski Excel</div>
+              <div className="grid gap-4 md:grid-cols-4">
+                <div className="text-center p-4 border rounded-lg">
+                  <div className="text-3xl font-bold text-orange-600">
+                    {comparisonResult.summary.changedCells}
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">Değiştirilen Hücre</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold">{comparisonResult.summary.totalNew}</div>
-                  <div className="text-sm text-muted-foreground">Yeni Excel</div>
+                <div className="text-center p-4 border rounded-lg">
+                  <div className="text-3xl font-bold text-green-600">
+                    {comparisonResult.summary.addedRows}
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">Eklenen Satır</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-green-600">{comparisonResult.summary.added}</div>
-                  <div className="text-sm text-muted-foreground">Eklenen</div>
+                <div className="text-center p-4 border rounded-lg">
+                  <div className="text-3xl font-bold text-red-600">
+                    {comparisonResult.summary.deletedRows}
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">Silinen Satır</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-red-600">{comparisonResult.summary.deleted}</div>
-                  <div className="text-sm text-muted-foreground">Silinen</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-orange-600">{comparisonResult.summary.modified}</div>
-                  <div className="text-sm text-muted-foreground">Değiştirilen</div>
+                <div className="text-center p-4 border rounded-lg">
+                  <div className="text-3xl font-bold">
+                    {comparisonResult.summary.totalCells}
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">Toplam Hücre</div>
                 </div>
               </div>
             </CardContent>
@@ -477,61 +403,62 @@ export default function ExcelComparePage() {
           {/* Side by Side View */}
           <Card>
             <CardHeader>
-              <CardTitle>Yan Yana Görünüm</CardTitle>
+              <CardTitle>Değişiklikler</CardTitle>
               <CardDescription>
-                Eski ve yeni Excel dosyalarının karşılaştırması
+                Sadece değişen hücreler gösteriliyor ({comparisonResult.diffs.length} değişiklik)
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm border-collapse">
                   <thead>
-                    <tr className="border-b">
+                    <tr className="border-b-2">
+                      <th className="text-left p-2 font-medium">Satır</th>
+                      <th className="text-left p-2 font-medium">Sütun</th>
                       <th className="text-left p-2 font-medium">Durum</th>
-                      {comparisonResult.headers.map((header) => (
-                        <th key={header} className="text-left p-2 font-medium">
-                          {header}
-                        </th>
-                      ))}
+                      <th className="text-left p-2 font-medium">Eski Değer</th>
+                      <th className="text-left p-2 font-medium">Yeni Değer</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {comparisonResult.diffs
-                      .filter((d) => d.type !== "unchanged")
-                      .map((diff, idx) => {
-                        const row = diff.newRow || diff.oldRow!;
-                        let bgColor = "";
-                        let statusBadge = null;
+                    {comparisonResult.diffs.slice(0, 100).map((diff, idx) => {
+                      let bgColor = "";
+                      let statusText = "";
 
-                        if (diff.type === "added") {
-                          bgColor = "bg-green-50";
-                          statusBadge = <Badge className="bg-green-500">YENİ</Badge>;
-                        } else if (diff.type === "deleted") {
-                          bgColor = "bg-red-50";
-                          statusBadge = <Badge className="bg-red-500">SİLİNDİ</Badge>;
-                        } else if (diff.type === "modified") {
-                          bgColor = "bg-orange-50";
-                          statusBadge = <Badge className="bg-orange-500">DEĞİŞTİ</Badge>;
-                        }
+                      if (diff.type === "added") {
+                        bgColor = "bg-green-50 dark:bg-green-950";
+                        statusText = "YENİ";
+                      } else if (diff.type === "deleted") {
+                        bgColor = "bg-red-50 dark:bg-red-950";
+                        statusText = "SİLİNDİ";
+                      } else if (diff.type === "modified") {
+                        bgColor = "bg-orange-50 dark:bg-orange-950";
+                        statusText = "DEĞİŞTİ";
+                      }
 
-                        return (
-                          <tr key={idx} className={`border-b ${bgColor}`}>
-                            <td className="p-2">{statusBadge}</td>
-                            {comparisonResult.headers.map((header) => (
-                              <td
-                                key={header}
-                                className={`p-2 ${
-                                  diff.changedFields?.includes(header) ? "font-bold text-orange-600" : ""
-                                }`}
-                              >
-                                {row[header] || "-"}
-                              </td>
-                            ))}
-                          </tr>
-                        );
-                      })}
+                      return (
+                        <tr key={idx} className={`border-b ${bgColor}`}>
+                          <td className="p-2">{diff.row + 1}</td>
+                          <td className="p-2">{String.fromCharCode(65 + diff.col)}</td>
+                          <td className="p-2">
+                            <Badge variant="outline">{statusText}</Badge>
+                          </td>
+                          <td className="p-2 font-mono text-xs">
+                            {formatCellValue(diff.oldValue) || <span className="text-muted-foreground">-</span>}
+                          </td>
+                          <td className="p-2 font-mono text-xs font-semibold">
+                            {formatCellValue(diff.newValue) || <span className="text-muted-foreground">-</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
+                {comparisonResult.diffs.length > 100 && (
+                  <div className="text-center text-sm text-muted-foreground mt-4">
+                    İlk 100 değişiklik gösteriliyor. Tüm değişiklikleri görmek için Excel'i indirin.
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -545,8 +472,16 @@ export default function ExcelComparePage() {
             <Button
               variant="outline"
               onClick={() => {
-                if (step === "select-keys") setStep("upload");
-                else if (step === "results") setStep("select-keys");
+                if (step === "select-sheets") {
+                  setStep("upload");
+                  setOldExcelInfo(null);
+                  setNewExcelInfo(null);
+                  setSelectedOldSheet(null);
+                  setSelectedNewSheet(null);
+                } else if (step === "results") {
+                  setStep("select-sheets");
+                  setComparisonResult(null);
+                }
               }}
               disabled={loading}
             >
@@ -558,27 +493,27 @@ export default function ExcelComparePage() {
         <div className="flex gap-2">
           {step === "upload" && (
             <Button
-              onClick={proceedToKeySelection}
+              onClick={analyzeExcelFiles}
               disabled={!oldExcelBase64 || !newExcelBase64 || loading}
             >
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  İşleniyor...
+                  Analiz ediliyor...
                 </>
               ) : (
                 <>
-                  İlerle
+                  Devam Et
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </>
               )}
             </Button>
           )}
 
-          {step === "select-keys" && (
+          {step === "select-sheets" && (
             <Button
               onClick={runComparison}
-              disabled={selectedKeyColumns.length === 0 || loading}
+              disabled={selectedOldSheet === null || selectedNewSheet === null || loading}
             >
               {loading ? (
                 <>
@@ -592,25 +527,19 @@ export default function ExcelComparePage() {
           )}
 
           {step === "results" && (
-            <>
-              <Button variant="outline" onClick={downloadComparison} disabled={loading}>
-                <Download className="mr-2 h-4 w-4" />
-                Excel İndir
-              </Button>
-              <Button onClick={saveEditedExcel} disabled={loading}>
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Kaydediliyor...
-                  </>
-                ) : (
-                  <>
-                    <Save className="mr-2 h-4 w-4" />
-                    Kaydet
-                  </>
-                )}
-              </Button>
-            </>
+            <Button onClick={downloadComparison} disabled={loading}>
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  İndiriliyor...
+                </>
+              ) : (
+                <>
+                  <Download className="mr-2 h-4 w-4" />
+                  Excel İndir
+                </>
+              )}
+            </Button>
           )}
         </div>
       </div>

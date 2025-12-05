@@ -456,7 +456,7 @@ export default function ExcelComparePage() {
                 </table>
                 {comparisonResult.diffs.length > 100 && (
                   <div className="text-center text-sm text-muted-foreground mt-4">
-                    İlk 100 değişiklik gösteriliyor. Tüm değişiklikleri görmek için Excel'i indirin.
+                    İlk 100 değişiklik gösteriliyor. Tüm değişiklikleri görmek için Excel&apos;i indirin.
                   </div>
                 )}
               </div>

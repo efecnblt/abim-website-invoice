@@ -129,7 +129,7 @@ SADECE JSON döndür, başka açıklama ekleme!`;
     console.log("PDF Text Preview (first 500 chars):", pdfText.substring(0, 500));
 
     // Step 2: Check if PDF is too long and needs chunking
-    const MAX_TEXT_LENGTH = 15000; // Characters (rough estimate for token limit)
+    const MAX_TEXT_LENGTH = 8000; // Smaller chunks to ensure all data is processed
     let extractedData;
 
     if (pdfText.length > MAX_TEXT_LENGTH) {
@@ -137,36 +137,58 @@ SADECE JSON döndür, başka açıklama ekleme!`;
 
       const chunks = chunkText(pdfText, MAX_TEXT_LENGTH);
       console.log(`📦 Split into ${chunks.length} chunks`);
+      console.log(`📊 Chunk sizes:`, chunks.map((c, i) => `Chunk ${i + 1}: ${c.length} chars`).join(', '));
 
       const allTables: any[] = [];
       let metadata: any = null;
 
       for (let i = 0; i < chunks.length; i++) {
-        console.log(`Processing chunk ${i + 1}/${chunks.length}...`);
+        console.log(`\n🔄 Processing chunk ${i + 1}/${chunks.length}...`);
 
         const chunkPrompt = i === 0
           ? `${prompt}\n\n=== FATURA METNİ (Bölüm ${i + 1}/${chunks.length}) ===\n${chunks[i]}`
-          : `Sen bir fatura analiz uzmanısın. Bu faturanın ${i + 1}. bölümünü işliyorsun. SADECE tablo verilerini çıkar, metadata atla.
+          : `Sen bir fatura/tablo analiz uzmanısın. Bu fatura metninin ${i + 1}/${chunks.length}. bölümünü işliyorsun.
+
+ÖNEMLİ TALİMATLAR:
+1. Bu bölümdeki TÜM tablo satırlarını çıkar
+2. Başlıkları tespit et: Pos, Date de prestation, Leistungsdatum, Article, Dénomination, Quantité, Menge, Unité, PU, TVA, Somme
+3. Her satırdaki tüm verileri eksiksiz al
+4. Boş satırları atla
+5. Metadata ekleme, sadece tablo verileri
 
 SADECE JSON formatında döndür:
 {
   "tables": [
     {
-      "headers": [...],
-      "rows": [...]
+      "headers": ["Pos", "Date de prestation", "Article", "Dénomination", "Quantité", "Unité", "TVA", "PU", "Somme EUR"],
+      "rows": [
+        {
+          "Pos": "1",
+          "Date de prestation": "2025-04-01",
+          "Article": "6031",
+          "Dénomination": "Concassé grès 0-45 mm",
+          "Quantité": 20.640,
+          "Unité": "t",
+          "TVA": "17%",
+          "PU": 17.50,
+          "Somme EUR": 361.20
+        }
+      ]
     }
   ]
 }
 
 === FATURA METNİ (Bölüm ${i + 1}/${chunks.length}) ===
-${chunks[i]}`;
+${chunks[i]}
+
+UNUTMA: Bu bölümdeki TÜM satırları çıkar!`;
 
         const response = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
             {
               role: "system",
-              content: "Sen bir fatura tablo veri çıkarma uzmanısın. Verilen fatura metninden tablo verilerini JSON formatında çıkarırsın."
+              content: "Sen bir fatura tablo veri çıkarma uzmanısın. Verilen fatura metninden TÜM tablo satırlarını eksiksiz JSON formatında çıkarırsın. Hiçbir satırı atlama!"
             },
             {
               role: "user",
@@ -186,20 +208,61 @@ ${chunks[i]}`;
           }
 
           const chunkData = JSON.parse(jsonText);
+          console.log(`  ✅ Chunk ${i + 1} parsed successfully`);
 
           // First chunk has metadata
           if (i === 0 && chunkData.metadata) {
             metadata = chunkData.metadata;
+            console.log(`  📋 Metadata extracted:`, JSON.stringify(metadata).substring(0, 100));
           }
 
           // Collect all tables
           if (chunkData.tables && Array.isArray(chunkData.tables)) {
+            chunkData.tables.forEach((table, tableIdx) => {
+              const rowCount = table.rows ? table.rows.length : 0;
+              console.log(`  📊 Table ${tableIdx + 1}: ${rowCount} rows, Headers:`, table.headers);
+            });
             allTables.push(...chunkData.tables);
+          } else {
+            console.log(`  ⚠️  Chunk ${i + 1}: No tables found`);
           }
         }
       }
 
-      // Merge all tables into one
+      // Merge tables with same headers into one table
+      console.log(`\n🔗 Merging ${allTables.length} tables...`);
+
+      const mergedTables: any[] = [];
+
+      for (const table of allTables) {
+        if (!table.headers || !table.rows || table.rows.length === 0) {
+          console.log(`  ⚠️  Skipping empty table`);
+          continue;
+        }
+
+        // Find existing table with same headers
+        const headersKey = JSON.stringify(table.headers.sort());
+        const existingTable = mergedTables.find(
+          t => JSON.stringify(t.headers.sort()) === headersKey
+        );
+
+        if (existingTable) {
+          // Merge rows into existing table
+          existingTable.rows.push(...table.rows);
+          console.log(`  ➕ Merged ${table.rows.length} rows into existing table`);
+        } else {
+          // Add as new table
+          mergedTables.push({
+            headers: table.headers,
+            rows: [...table.rows]
+          });
+          console.log(`  ✨ Created new table with ${table.rows.length} rows`);
+        }
+      }
+
+      const totalRows = mergedTables.reduce((sum, t) => sum + t.rows.length, 0);
+      console.log(`✅ Final result: ${mergedTables.length} table(s) with ${totalRows} total rows`);
+
       extractedData = {
         metadata: metadata || {
           invoiceNumber: null,
@@ -209,10 +272,8 @@ ${chunks[i]}`;
           totalAmount: null,
           currency: null
         },
-        tables: allTables
+        tables: mergedTables
       };
-
-      console.log(`✅ Merged ${allTables.length} tables from ${chunks.length} chunks`);
     } else {
       // Normal processing for short PDFs
       const response = await openai.chat.completions.create({

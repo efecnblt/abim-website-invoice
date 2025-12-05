@@ -65,6 +65,13 @@ export default function ExcelComparePage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Check file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      setError(`Dosya çok büyük (${(file.size / 1024 / 1024).toFixed(2)}MB). Maksimum 10MB olabilir.`);
+      return;
+    }
+
     setOldExcelFile(file);
     setLoading(true);
     setError(null);
@@ -83,6 +90,13 @@ export default function ExcelComparePage() {
   const handleNewExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Check file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      setError(`Dosya çok büyük (${(file.size / 1024 / 1024).toFixed(2)}MB). Maksimum 10MB olabilir.`);
+      return;
+    }
 
     setNewExcelFile(file);
     setLoading(true);
@@ -119,8 +133,15 @@ export default function ExcelComparePage() {
       });
 
       if (!response.ok) {
-        const result = await response.json();
-        throw new Error(result.details || "Excel analizi başarısız");
+        let errorMessage = "Excel analizi başarısız";
+        try {
+          const result = await response.json();
+          errorMessage = result.details || result.error || errorMessage;
+        } catch (e) {
+          // If response is not JSON, show generic error
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();

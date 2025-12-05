@@ -53,9 +53,9 @@ export interface ComparisonResult {
 /**
  * Read Excel file and extract data
  */
-export async function readExcelFile(buffer: Buffer): Promise<ExcelData> {
+export async function readExcelFile(buffer: Buffer | ArrayBuffer): Promise<ExcelData> {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+  await workbook.xlsx.load(buffer as any);
 
   // Get first worksheet
   const worksheet = workbook.worksheets[0];
@@ -138,8 +138,8 @@ function findChangedFields(oldRow: ExcelRow, newRow: ExcelRow, headers: string[]
  * Compare two Excel files
  */
 export async function compareExcelFiles(
-  oldBuffer: Buffer,
-  newBuffer: Buffer,
+  oldBuffer: Buffer | ArrayBuffer,
+  newBuffer: Buffer | ArrayBuffer,
   keyColumns: string[]
 ): Promise<ComparisonResult> {
   // Read both Excel files

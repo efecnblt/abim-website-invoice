@@ -129,7 +129,7 @@ SADECE JSON döndür, başka açıklama ekleme!`;
     console.log("PDF Text Preview (first 500 chars):", pdfText.substring(0, 500));
 
     // Step 2: Check if PDF is too long and needs chunking
-    const MAX_TEXT_LENGTH = 8000; // Smaller chunks to ensure all data is processed
+    const MAX_TEXT_LENGTH = 12000; // Optimized chunk size for balance between speed and completeness
     let extractedData;
 
     if (pdfText.length > MAX_TEXT_LENGTH) {
@@ -137,17 +137,28 @@ SADECE JSON döndür, başka açıklama ekleme!`;
 
       const chunks = chunkText(pdfText, MAX_TEXT_LENGTH);
       console.log(`📦 Split into ${chunks.length} chunks`);
-      console.log(`📊 Chunk sizes:`, chunks.map((c, i) => `Chunk ${i + 1}: ${c.length} chars`).join(', '));
+      console.log(`📊 Estimated processing time: ~${chunks.length * 15}s (${chunks.length} chunks × ~15s each)`);
 
       const allTables: any[] = [];
       let metadata: any = null;
 
-      for (let i = 0; i < chunks.length; i++) {
-        console.log(`\n🔄 Processing chunk ${i + 1}/${chunks.length}...`);
+      // Process chunks in parallel (batch of 3 at a time to avoid rate limits)
+      const PARALLEL_CHUNKS = 3;
+      console.log(`⚡ Processing chunks in batches of ${PARALLEL_CHUNKS}...`);
 
-        const chunkPrompt = i === 0
-          ? `${prompt}\n\n=== FATURA METNİ (Bölüm ${i + 1}/${chunks.length}) ===\n${chunks[i]}`
-          : `Sen bir fatura/tablo analiz uzmanısın. Bu fatura metninin ${i + 1}/${chunks.length}. bölümünü işliyorsun.
+      for (let batchStart = 0; batchStart < chunks.length; batchStart += PARALLEL_CHUNKS) {
+        const batchEnd = Math.min(batchStart + PARALLEL_CHUNKS, chunks.length);
+        const batchChunks = chunks.slice(batchStart, batchEnd);
+
+        console.log(`\n📦 Processing batch ${Math.floor(batchStart / PARALLEL_CHUNKS) + 1}: chunks ${batchStart + 1}-${batchEnd}...`);
+
+        const batchPromises = batchChunks.map(async (chunk, batchIndex) => {
+          const i = batchStart + batchIndex;
+          console.log(`  🔄 Starting chunk ${i + 1}/${chunks.length}...`);
+
+          const chunkPrompt = i === 0
+            ? `${prompt}\n\n=== FATURA METNİ (Bölüm ${i + 1}/${chunks.length}) ===\n${chunk}`
+            : `Sen bir fatura/tablo analiz uzmanısın. Bu fatura metninin ${i + 1}/${chunks.length}. bölümünü işliyorsun.
 
 ÖNEMLİ TALİMATLAR:
 1. Bu bölümdeki TÜM tablo satırlarını çıkar
@@ -179,54 +190,71 @@ SADECE JSON formatında döndür:
 }
 
 === FATURA METNİ (Bölüm ${i + 1}/${chunks.length}) ===
-${chunks[i]}
+${chunk}
 
 UNUTMA: Bu bölümdeki TÜM satırları çıkar!`;
 
-        const response = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: "Sen bir fatura tablo veri çıkarma uzmanısın. Verilen fatura metninden TÜM tablo satırlarını eksiksiz JSON formatında çıkarırsın. Hiçbir satırı atlama!"
-            },
-            {
-              role: "user",
-              content: chunkPrompt
-            }
-          ],
-          max_tokens: 16000,
-          temperature: 0.1,
-          response_format: { type: "json_object" }
-        });
+          const response = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+              {
+                role: "system",
+                content: "Sen bir fatura tablo veri çıkarma uzmanısın. Verilen fatura metninden TÜM tablo satırlarını eksiksiz JSON formatında çıkarırsın. Hiçbir satırı atlama!"
+              },
+              {
+                role: "user",
+                content: chunkPrompt
+              }
+            ],
+            max_tokens: 16000,
+            temperature: 0.1,
+            response_format: { type: "json_object" }
+          });
 
-        const chunkText = response.choices[0]?.message?.content;
-        if (chunkText) {
+          const chunkText = response.choices[0]?.message?.content;
+          if (!chunkText) {
+            console.log(`  ⚠️  Chunk ${i + 1}: Empty response`);
+            return { index: i, metadata: null, tables: [] };
+          }
+
           let jsonText = chunkText.trim();
           if (jsonText.startsWith("```json")) {
             jsonText = jsonText.replace(/```json\n?/g, "").replace(/```\n?/g, "");
           }
 
           const chunkData = JSON.parse(jsonText);
-          console.log(`  ✅ Chunk ${i + 1} parsed successfully`);
+          console.log(`  ✅ Chunk ${i + 1} completed`);
 
-          // First chunk has metadata
-          if (i === 0 && chunkData.metadata) {
-            metadata = chunkData.metadata;
-            console.log(`  📋 Metadata extracted:`, JSON.stringify(metadata).substring(0, 100));
-          }
-
-          // Collect all tables
+          // Log table info
           if (chunkData.tables && Array.isArray(chunkData.tables)) {
             chunkData.tables.forEach((table: any, tableIdx: number) => {
               const rowCount = table.rows ? table.rows.length : 0;
-              console.log(`  📊 Table ${tableIdx + 1}: ${rowCount} rows, Headers:`, table.headers);
+              console.log(`    📊 Table ${tableIdx + 1}: ${rowCount} rows`);
             });
-            allTables.push(...chunkData.tables);
-          } else {
-            console.log(`  ⚠️  Chunk ${i + 1}: No tables found`);
           }
-        }
+
+          return {
+            index: i,
+            metadata: i === 0 ? chunkData.metadata : null,
+            tables: chunkData.tables || []
+          };
+        });
+
+        // Wait for all chunks in this batch to complete
+        const batchResults = await Promise.all(batchPromises);
+
+        // Collect results
+        batchResults.forEach((result) => {
+          if (result.metadata && !metadata) {
+            metadata = result.metadata;
+            console.log(`  📋 Metadata extracted from chunk ${result.index + 1}`);
+          }
+          if (result.tables && Array.isArray(result.tables)) {
+            allTables.push(...result.tables);
+          }
+        });
+
+        console.log(`  ✅ Batch completed`);
       }
 
       // Merge tables with same headers into one table

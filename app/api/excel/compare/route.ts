@@ -4,15 +4,6 @@ import { readExcelFile, compareSheets } from '@/lib/excel-compare';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// Configure Next.js to handle larger request bodies (50MB)
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '50mb',
-    },
-  },
-};
-
 /**
  * Compare two Excel sheets
  *

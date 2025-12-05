@@ -184,7 +184,7 @@ export default function ExcelComparePage() {
       const buffer = await exportComparisonToExcel(comparisonResult, false);
 
       // Download
-      const blob = new Blob([buffer], {
+      const blob = new Blob([new Uint8Array(buffer)], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const url = URL.createObjectURL(blob);

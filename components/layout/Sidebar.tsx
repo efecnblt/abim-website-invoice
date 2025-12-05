@@ -11,6 +11,7 @@ import {
   Settings,
   LogOut,
   X,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -18,6 +19,7 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard/overview", icon: LayoutDashboard },
   { name: "Yeni İşlem", href: "/dashboard/new", icon: Upload },
   { name: "Geçmiş", href: "/dashboard/history", icon: History },
+  { name: "Excel Karşılaştır", href: "/dashboard/compare", icon: FileSpreadsheet },
   { name: "Şablonlar", href: "/dashboard/templates", icon: FileCode2 },
   { name: "Ayarlar", href: "/dashboard/settings", icon: Settings },
 ];

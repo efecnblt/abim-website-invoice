@@ -146,3 +146,79 @@ export async function listStorageFiles() {
 
   return data;
 }
+
+/**
+ * Upload Excel to Supabase Storage
+ */
+export async function uploadExcelToSupabase(
+  file: File | Buffer,
+  fileName: string
+): Promise<{ path: string; publicUrl: string }> {
+  const supabase = getSupabaseServer();
+
+  // Generate unique filename
+  const timestamp = Date.now();
+  const randomString = Math.random().toString(36).substring(7);
+  const sanitizedName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+  const uniqueFileName = `excel/${timestamp}_${randomString}_${sanitizedName}`;
+
+  // Upload to Supabase Storage
+  const { data, error } = await supabase.storage
+    .from('invoices')
+    .upload(uniqueFileName, file, {
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      cacheControl: '3600',
+      upsert: false,
+    });
+
+  if (error) {
+    console.error('Supabase Excel upload error:', error);
+    throw new Error(`Excel upload failed: ${error.message}`);
+  }
+
+  // Get public URL
+  const { data: publicData } = supabase.storage
+    .from('invoices')
+    .getPublicUrl(data.path);
+
+  return {
+    path: data.path,
+    publicUrl: publicData.publicUrl,
+  };
+}
+
+/**
+ * Download Excel from Supabase Storage
+ */
+export async function downloadExcelFromSupabase(filePath: string): Promise<Blob> {
+  const supabase = getSupabaseServer();
+
+  const { data, error } = await supabase.storage
+    .from('invoices')
+    .download(filePath);
+
+  if (error) {
+    console.error('Supabase Excel download error:', error);
+    throw new Error(`Excel download failed: ${error.message}`);
+  }
+
+  return data;
+}
+
+/**
+ * Delete Excel from Supabase Storage
+ */
+export async function deleteExcelFromSupabase(filePath: string): Promise<boolean> {
+  const supabase = getSupabaseServer();
+
+  const { error } = await supabase.storage
+    .from('invoices')
+    .remove([filePath]);
+
+  if (error) {
+    console.error('Supabase Excel delete error:', error);
+    return false;
+  }
+
+  return true;
+}

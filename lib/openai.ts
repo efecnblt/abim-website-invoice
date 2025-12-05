@@ -218,7 +218,7 @@ UNUTMA: Bu bölümdeki TÜM satırları çıkar!`;
 
           // Collect all tables
           if (chunkData.tables && Array.isArray(chunkData.tables)) {
-            chunkData.tables.forEach((table, tableIdx) => {
+            chunkData.tables.forEach((table: any, tableIdx: number) => {
               const rowCount = table.rows ? table.rows.length : 0;
               console.log(`  📊 Table ${tableIdx + 1}: ${rowCount} rows, Headers:`, table.headers);
             });
